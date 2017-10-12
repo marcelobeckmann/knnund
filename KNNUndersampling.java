@@ -1,420 +1,452 @@
-package weka.filters.supervised.instance;
+package com.rapidminer.operator.preprocessing.transformation;
 
-
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Enumeration;
+import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
-import java.util.Random;
-import java.util.Vector;
 
-import javax.swing.JOptionPane;
+import com.rapidminer.example.Attribute;
+import com.rapidminer.example.Attributes;
+import com.rapidminer.example.Example;
+import com.rapidminer.example.ExampleSet;
+import com.rapidminer.example.set.Partition;
+import com.rapidminer.example.set.SplittedExampleSet;
+import com.rapidminer.operator.Operator;
+import com.rapidminer.operator.OperatorDescription;
+import com.rapidminer.operator.OperatorException;
+import com.rapidminer.operator.ports.InputPort;
+import com.rapidminer.operator.ports.OutputPort;
+import com.rapidminer.operator.ports.metadata.ExampleSetMetaData;
+import com.rapidminer.operator.ports.metadata.ExampleSetPassThroughRule;
+import com.rapidminer.operator.ports.metadata.SetRelation;
+import com.rapidminer.parameter.ParameterType;
+import com.rapidminer.parameter.ParameterTypeDouble;
+import com.rapidminer.parameter.ParameterTypeInt;
+import com.rapidminer.parameter.ParameterTypeString;
+import com.rapidminer.parameter.UndefinedParameterError;
+import com.rapidminer.tools.container.Tupel;
+import com.rapidminer.tools.math.container.GeometricDataCollection;
+import com.rapidminer.tools.math.container.LinearList;
+import com.rapidminer.tools.math.similarity.DistanceMeasure;
+import com.rapidminer.tools.math.similarity.DistanceMeasureHelper;
+import com.rapidminer.tools.math.similarity.DistanceMeasures;
 
-import weka.core.Capabilities;
-import weka.core.Capabilities.Capability;
-import weka.core.Instance;
-import weka.core.Instances;
-import weka.core.Option;
-import weka.core.OptionHandler;
-import weka.core.TechnicalInformation;
-import weka.core.TechnicalInformation.Field;
-import weka.core.TechnicalInformation.Type;
-import weka.core.TechnicalInformationHandler;
-import weka.core.Utils;
-import weka.core.neighboursearch.LinearNNSearch;
-import weka.core.neighboursearch.NearestNeighbourSearch;
-import weka.filters.SimpleBatchFilter;
-import weka.filters.SupervisedFilter;
+/**
+ * KNN Undersampling implementation.
+ * 
+ * @author Marcelo Beckmann
+ */
 
+public class KNNUndersampling extends Operator {
 
-public class KNNUndersampling extends SimpleBatchFilter implements SupervisedFilter,
-		OptionHandler, TechnicalInformationHandler {
-
-	/**
-	 * 
-	 */
-	private static final long serialVersionUID = -2103039882958523000L;
-
-	/** Number of references */
-
-	private int k = 5;
-
-	private int t_threshold = 1;
+	public static final String PARAMETER_MAJORITYT_LABEL = "majority_label";
+	public static final String PARAMETER_K = "k";
+	public static final String PARAMETER_THRESHOLD = "threshold"; 
+//	public static final String PARAMETER_USE_DISTANCE_WEIGHT = "use_distance_weighting";	
+	public static final String PARAMETER_LOG_VERBOSITY = "log_verbosity";
+    public static final String PARAMETER_GENERATE_OUTPUT_FILE ="file_output";
 	
+	private InputPort exampleSetInput= getInputPorts().createPort("example set");
+	private OutputPort exampleSetOutput = getOutputPorts().createPort("example set");
+	private DistanceMeasureHelper measureHelper = new DistanceMeasureHelper(this);
+	private GeometricDataCollection<Integer> knn;
 	
-	protected int w_majorityClass = 1;
-
-	
-	public static Instances original;
-	
-	/** for nearest-neighbor search. */
-	protected NearestNeighbourSearch K_NNSearch = new LinearNNSearch();
-	
-	private Random random;
-	
-	// inner class to hold a pair of doubles
-	// (for maintaining a running list of nearest neighbors)
-	class ClassDistance {
-		double _class;
-
-		double distance;
-
-		int index;
-
-	}
-
-	
-	public KNNUndersampling() {
-
-	}
-
-	/**
-	 * Returns the description of the classifier.
-	 * 
-	 * @return description of the KNN class.
-	 */
-	public String globalInfo() {
-		return "Implementation of SMOTEFilter (Syntethic Minority Over-sampling Technique), "
-				+ "aplied over a KNN algorithm, in order to improve the classification "
-				+ "with imbalanced datasets.\n\n"
-
-				+ "For more information see:\n\n"
-				+ getTechnicalInformation().toString();
-
-	}
-
-	/**
-	 * sets k
-	 * 
-	 * @param new_k
-	 *            new k value.
-	 */
-	public void setK(int new_k) {
-		k = new_k;
-	}
-
-	/**
-	 * gets k
-	 * 
-	 * @return k
-	 */
-	public int getK() {
-		return k;
-	}
-
-	protected Instances determineOutputFormat(Instances inputFormat)
-			throws Exception {
-
-		return inputFormat;
-	}
-
-	protected Instances process(Instances data) throws Exception {
-
-		long startT= System.currentTimeMillis();
-		
-		original = new Instances(data);
-		//Initialize random seed
-		
-		
-		List <Integer> toBeRemoved = obtainInstancesToRemove(data);
-		
-		
-		Instances cleanData = new Instances(data,0);
-		for (int i=0;i<data.numInstances();i++) {
-			
-			if (!toBeRemoved.contains(i)) {
-				Instance instance = (Instance) data.instance(i);
-				cleanData.add(instance);
-			}
-		} 
-
-		final long elapsed = System.currentTimeMillis()-startT;
-		
-		new Thread() {
-			
-			public void run()
-			{
-				JOptionPane.showConfirmDialog(null, "Elapsed time:" + elapsed);
-				
-			}
-			
-		}.start();
-		
-		
-		
-		return cleanData;
-
-	}
-
-	protected List <Integer> obtainInstancesToRemove(Instances data) {
-
-		// Obtain the samples from class w
-		Instances majority = new Instances(data, 0);
-		Enumeration en = data.enumerateInstances();
-		while (en.hasMoreElements()) {
-			Instance instance = (Instance) en.nextElement();
-			if (instance.classValue() == w_majorityClass) {
-				majority.add(instance);
-			}
-		}
-		int T = majority.numInstances();
-
-		
-
-
-		// Instances for synthetic samples
-		List <Integer> toRemove = new ArrayList();
-
-		/*
-		 * Compute k nearest neighbors for i, and save the indices in the
-		 * nnarray
-		 */
-		
+	private Attribute labelAtt;
+	private int majorityClassIndex;
+	private Attributes attributes;
+	private boolean useDistanceWeight;	
+	private int logVerbosity=0;
+	private static FileWriter out ;
+	/*
+	static 
+	{
+		KNNUndersampling.setupOutfile("c:/var/tmp/output/__knnund.csv");
 		try {
-			K_NNSearch.setInstances(data);
-		} catch (Exception e) {
+			out.write("test\n");
+			out.close();
+		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
-		
-		en = data.enumerateInstances();
-		int i=0;
-		while (en.hasMoreElements()) {
-			Instance instance = (Instance) en.nextElement();
-			if (instance.classValue() == w_majorityClass) {
-				List <Instance>knnList = generateKnnList(instance);	
-				if (decideToRemove( knnList)) {
-						toRemove.add(i);
-				}
+	
+	}
+
+	public static void main(String args[])
+	{}
+
+	private  static void setupOutfile(String outputFile)  {
+	
+		try {
+			File file =new File(outputFile);
+			out = new FileWriter(file,true);
+			
+			if (!file.exists())
+			{
+				file.createNewFile();
 			}
-			i++;
+			if (file.length()==0) {
+				String header ="id,numMinClasses,numMajClass,minDistWeight,majDistWeight,removed\n";
+				out.write(header);
+				out.flush();
+			}
+			
+		} catch (Exception e)
+		{
+			e.printStackTrace();
+		}
+	
+	}
+
+*/
+	
+	
+	/**
+	 * Constructor
+	 */
+	public KNNUndersampling(OperatorDescription description) {
+		super(description);
+
+		getTransformer().addRule(new ExampleSetPassThroughRule(exampleSetInput, exampleSetOutput, SetRelation.EQUAL) {
+
+			@Override
+			public ExampleSetMetaData modifyExampleSet(ExampleSetMetaData metaData) throws UndefinedParameterError {
+
+				return metaData;
+			}
+		});
+	}
+	
+	
+	
+
+	@Override
+	public void doWork() throws OperatorException {
+		
+		ExampleSet inputSet = exampleSetInput.getData();
+		if (inputSet.size()==0)
+		{
+			throw new OperatorException("Error: inputset is empty!");
 		}
 		
+	/*	String outFile = getParameterAsString(this.PARAMETER_GENERATE_OUTPUT_FILE);
+		if (outFile!=null || outFile.isEmpty()) {
+			setupOutfile(getParameterAsString(this.PARAMETER_GENERATE_OUTPUT_FILE));
+		}
+      */  
+		
+		useDistanceWeight = false ;//getParameterAsBoolean(PARAMETER_USE_DISTANCE_WEIGHT);
+		attributes = inputSet.getAttributes();
+		logVerbosity = getParameterAsInt(PARAMETER_LOG_VERBOSITY);
+		
+		
+		// Figure out the nominal index for the mapping
+		labelAtt = attributes.getLabel();
+		if (labelAtt == null) {
+			throw new OperatorException("Label attribute is not present. Use set role to define a label to exampleset.");
+		}
+		String majorityClasslabel = this.getParameterAsString(PARAMETER_MAJORITYT_LABEL);
+	
+		
+		ExampleSet labelExampleSet = getExampleSetByLabelValue(inputSet, majorityClasslabel);
+		int k = getK(inputSet);		
+		
+		majorityClassIndex = labelAtt.getMapping().getIndex(majorityClasslabel);
+		
+		if (labelExampleSet == null) {
+			throw new OperatorException("Label " + majorityClasslabel + " does not exist in the exampleset.");
+		}
+		
+		List<Integer> toBeRemoved=null;
+		try {
+			toBeRemoved = obtainInstancesToRemove(inputSet, majorityClasslabel, k);
+		} catch (Exception e) {
+			e.printStackTrace();
+			throw new OperatorException(e.getMessage());
+		}
+		
+		if (out!=null)
+		{
+
+			try {
+				out.close();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+			
+		}
+		exampleSetOutput.deliver(createCleanExampleSet(inputSet,toBeRemoved));
+	}
+
+
+
+
+	/** Transforms an Example in a double array */
+	
+	private double[] toDoubleArray(Example example)
+	{
+		double values[] = new double[attributes.size()+1];
+		int j=0;
+		for (Iterator <Attribute>i$ = attributes.iterator(); i$.hasNext();) {
+			Attribute attribute = i$.next();
+			values[j] = example.getValue(attribute);
+			j++;
+		}
+		return values;
+	}
+	
+
+
+	private ExampleSet getExampleSetByLabelValue(ExampleSet inputSet, String label) {
+		SplittedExampleSet e = SplittedExampleSet.splitByAttribute(inputSet, labelAtt);
+
+		int labelIndex = labelAtt.getMapping().getIndex(label);
+		if (labelIndex == -1) {
+			return null;
+		}
+
+		SplittedExampleSet b = (SplittedExampleSet) e.clone();
+		b.selectSingleSubset(labelIndex);
+
+		return b;
+	}
+
+	
+		
+	protected List<Integer> obtainInstancesToRemove(ExampleSet data, String majorityClassLabel, int k) throws Exception {
+
+				
+		// Instances for synthetic samples
+		List<Integer> toRemove = new ArrayList<Integer>();
+		/*
+		 * Compute k nearest neighbors for i, and save the indices in the nnarray
+		 */
+		double threshold = getParameterAsDouble(PARAMETER_THRESHOLD);
+		knn = obtainNeighbors(data);
+		
+		for (int i = 0; i < data.size(); i++) {
+			checkForStop();
+			Example example = data.getExample(i);
+			if ( example.getValue(labelAtt) == majorityClassIndex )
+			{
+				double values[] = toDoubleArray(example);
+				Collection<Tupel<Double, Integer>> neighbours = knn.getNearestValueDistances(k, values);
+				
+				if (decideToRemove(neighbours, majorityClassIndex, threshold, example,i)) {
+					toRemove.add(i);
+				}
+			
+			}
+		}
+		//System.out.println("############# knn und exited NORMALLY, best k=" + k+ ", to be removed: "+toRemove.size()+" , remaining : " + (data.size()-toRemove.size()));
+
 		return toRemove;
 	}
 
+	private ExampleSet createCleanExampleSet(ExampleSet oldExampleSet, List<Integer> toRemove) throws OperatorException {
+		
+		int partition[] = new int[oldExampleSet.size()];
+		int i = 0;
+		int ct = 0;
+		for (Example example : oldExampleSet) {
+			if (!toRemove.contains(i)) {
+				partition[i] = 1;
+				ct++;
+			}
+
+			i++;
+		}
+
+		SplittedExampleSet result = new SplittedExampleSet(oldExampleSet, new Partition(partition, 2));
+		result.selectSingleSubset(1);
+		//System.out.println("old:" + oldExampleSet.size() + "result:" + result.size() + "/data:" + oldExampleSet.size() + "/ct:" + ct);
+		return result;
+	}
+	
 	/* Function to take a decision about remove or not the instance */
-	protected boolean decideToRemove( List<Instance> knnList) {
+	protected boolean decideToRemove(Collection<Tupel<Double, Integer>> neighbours, int majorityClass, double threshold, Example example,int i ) {
+
+		int numberFromMinorityClasses = 0;
+		int numberFromMajorityClasses = 0;
+		double minorityDistanceWeight=0;
+		double majorityDistanceWeight=0;
 		
-		int numberFromMinorityClasses=0;
 		
-		for (int j=0;j<knnList.size();++j)
+		
+		int actualLabel = (int)example.getLabel();
+
+		Iterator <Tupel<Double, Integer>>iterator = neighbours.iterator();
+		while (iterator.hasNext()) {
+			Tupel<Double, Integer> neighbor =  iterator.next();
+			Integer neighborLabel = neighbor.getSecond();
+			
+			double weight = 1/neighbor.getFirst();
+			if (Double.isNaN(weight) || Double.isInfinite(weight))
+			{
+				weight=0;
+			}
+			//Distance weight is aka density
+			if (useDistanceWeight) {
+				
+				if (neighborLabel != majorityClass) {
+					numberFromMinorityClasses+= weight;
+				}
+				else
+				{
+					numberFromMajorityClasses+= weight;
+					
+				}
+			} else
+			{
+				if (neighborLabel != majorityClass) {
+					minorityDistanceWeight+=weight;
+					numberFromMinorityClasses++;
+				}
+				else
+				{
+					majorityDistanceWeight+=weight;
+					numberFromMajorityClasses++;
+					
+				}
+				
+			}
+			
+			
+		}
+
+		
+		//TENTATIVA, REMOVER SE NAO FUNCIONAR
+	/*	if (numberFromMinorityClasses==0)
+			return true;
+		else if (true)
+			return false;
+	*/	
+		
+		boolean removeIt;
+		
+
+		//Distance weight is discarded from this decision because the bad results
+		removeIt= (numberFromMinorityClasses >= threshold);
+		
+
+
+		
+		if (logVerbosity==1)
 		{
-			Instance neighbor = knnList.get(j);
-			if (neighbor.classValue() != w_majorityClass) {
-				numberFromMinorityClasses++;
-			}
-			
-			
+			System.out.println("#### " +(int) example.getId() + ", label:"+actualLabel+", min_neigh:" +numberFromMinorityClasses+", maj_neigh:"+numberFromMajorityClasses +", weighted: "+
+			minorityDistanceWeight  + "/"+majorityDistanceWeight+" "+(removeIt?"*":"") );
 		}
-		//TODO HOW TO DECIDE IF NOT ALL NEIGHBORS ARE FROM MINORITY?
-		return  (numberFromMinorityClasses>=t_threshold);
-			
+		else if (logVerbosity==2)
+		{
+			System.out.println(numberFromMinorityClasses+","+numberFromMajorityClasses  +"," +actualLabel );
+		}
 
-	}
-
-	protected List<Instance> generateKnnList(Instance instance) {
-		List knnList = new ArrayList();
-		try {
+		if (out!=null)
+		{
+			StringBuilder sb = new StringBuilder();
+			sb.append(example.getId());
+			sb.append(',');
+			sb.append(numberFromMinorityClasses);
+			sb.append(',');
+			sb.append(numberFromMajorityClasses);
+			sb.append(',');
+			sb.append(minorityDistanceWeight);
+			sb.append(',');
+			sb.append(majorityDistanceWeight);
+			sb.append(',');
+			sb.append((removeIt?1:0));
+			sb.append('\n');
 			
-			Instances nns = K_NNSearch.kNearestNeighbours(instance, this.k);
-			
-			
-			
-			for (int i = 0; i < nns.numInstances(); i++) {
-				knnList.add(nns.instance(i));
+			try {
+				out.write(sb.toString());
+				out.flush();
+			} catch (IOException e) {
+				e.printStackTrace();
 			}
-			return knnList;
-		} catch (Exception e) {
-			e.printStackTrace();
-			return null;
+		
 		}
 		
 		
-
-		
+		return removeIt;
+			
 	}
 
-	// ----------------------------------------------------------------------------
+	// From KNNLearnar
+	private GeometricDataCollection obtainNeighbors(ExampleSet exampleSet) throws Exception {
 
-	public Capabilities getCapabilities() {
-		Capabilities result = super.getCapabilities();
+		DistanceMeasure measure = measureHelper.getInitializedMeasure(exampleSet);
+		if (labelAtt.isNominal()) {
+			// classification
+			GeometricDataCollection<Integer> samples = new LinearList<Integer>(measure);
 
-		// attributes
-		result.enable(Capability.NOMINAL_ATTRIBUTES);
-		result.enable(Capability.NUMERIC_ATTRIBUTES);
-		result.enable(Capability.DATE_ATTRIBUTES);
-		result.enable(Capability.RELATIONAL_ATTRIBUTES);
-		// result.enable(Capability.MISSING_VALUES);
+			int valuesSize = attributes.size();
+			for (Example example : exampleSet) {
+				// if (firstCount++<10)
+				// System.out.println("############" + example.getClass().getCanonicalName());
+				double[] values = new double[valuesSize];
+				int i = 0;
+				for (Attribute attribute : attributes) {
+					values[i] = example.getValue(attribute);
+					i++;
+				}
+				int labelValue = (int) example.getValue(labelAtt);
+				samples.add(values, labelValue);
+				checkForStop();
+			}
+			return samples;
+			// return new KNNClassificationModel(exampleSet, samples,k, getParameterAsBoolean(PARAMETER_WEIGHTED_VOTE));
 
-		// class
-		result.enable(Capability.NOMINAL_CLASS);
-		result.enable(Capability.MISSING_CLASS_VALUES);
-
-		// other
-		// result.enable(Capability.ONLY_MULTIINSTANCE);
-
-		return result;
-	}
-
-	
-
-	public TechnicalInformation getTechnicalInformation() {
-		TechnicalInformation result;
-		result = new TechnicalInformation(Type.INPROCEEDINGS);
-		result
-				.setValue(
-						Field.AUTHOR,
-						"Nitesh V. Chawla, Kevin W. Bowyer, Lawrence O. Hall, W. Philip Kegelmeyer."
-								+ "\nImplemented in Weka by Marcelo Beckmann - Federal University of Rio de Janeiro - COPPE/PEC");
-		result.setValue(Field.TITLE,
-				"\nSMOTE: Synthetic Minority Over-sampling TEchnique");
-		result.setValue(Field.BOOKTITLE,
-				"Journal of Artificial Inteligence Research 16");
-		result.setValue(Field.EDITOR,
-				"AI Access Foundation and Morgan Kaufmann");
-		result.setValue(Field.YEAR, "2002");
-		result.setValue(Field.PAGES, "321-357");
-
-		return result;
-	}
-
-	public String percentToUndersampleTipText() {
-
-		return "Percent of instances to be undersampled.";
-	}
-
-	public String kTipText() {
-		return "Number of Nearest Neighbors.";
-	}
-
-	public String amountOfSMOTETipText() {
-		return "Amount of SMOTEFilter N% to be created. Use multiples of 100.";
-	}
-
-	public String minorityClassTipText() {
-		return "Index of minority class, starting with 0.";
-	}
-
-	public Enumeration listOptions() {
-		Vector result = new Vector();
-
-		result.addElement(new Option(
-				"\tNumber of Nearest Neighbors (default 2).", "K", 0,
-				"-K <number of references>"));
-
-		result.addElement(new Option(
-						"\tThreshold decision to remove , based in the count of neighbors belonging to another class (default 1).",
-						"t", 0,
-						"-t <Threshold decision>"));
-
-		result.addElement(new Option(
-				"\tIndex of minority class, starting with 0 (default 0).", "w",
-				0, "-w <Index of minority class>"));
-		
-		result.addElement(new Option("\tSeed number used to generate random numbers. If -1 uses the current time in milliseconds^2.", "m", -1,
-				"-m <Random seed>"));
-		
-
-		return result.elements();
-	}
-
-	public void setOptions(String[] options) throws Exception {
-		// setDebug(Utils.getFlag('D', options));
-
-		String option = Utils.getOption('k', options);
-		if (option.length() != 0)
-			k = Integer.parseInt(option);
+		}
 		else
-			k = 5;
-
-	
-
-		option = Utils.getOption('w', options);
-		if (option.length() != 0)
-			w_majorityClass = Integer.parseInt(option);
-		else
-			w_majorityClass = 0;
-		
-		
-	
-
+			throw new OperatorException("Nominal label is required");
 		
 	}
-
-	/**
-	 * Gets the current option settings for the OptionHandler.
-	 * 
-	 * @return the list of current option settings as an array of strings
-	 */
-	public String[] getOptions() {
-		Vector result;
-
-		result = new Vector();
-
-		// if (getDebug())
-		// result.add("-D");
+	
+	
+	private int getK(ExampleSet inputSet) throws UndefinedParameterError
+	{
+		int k = getParameterAsInt(PARAMETER_K);
 		
+		if (k==-1)
+		{
+			k =(int) Math.round( Math.pow(inputSet.size() ,0.5));
+		}
+		
+		//If even, get the nearest odd number
+		if (k%2==0) {
+			k++;
+		}
+		return k;
+	}
 
-		result.add("-k");
-		result.add("" + k);
+	
+	public List<ParameterType> getParameterTypes() {
+		List<ParameterType> types = super.getParameterTypes();
 
-		result.add("-t");
-		result.add("" + t_threshold);
+		ParameterType type = new ParameterTypeString(PARAMETER_MAJORITYT_LABEL, "The class label that will be undersampled.", "", false);
+		type.setExpert(false);
+		types.add(type);
 
 		
-		result.add("-w");
-		result.add("" + w_majorityClass);
+		types.add(new ParameterTypeDouble(PARAMETER_THRESHOLD, "The threshold number of k nearest instances of different classes to remove the majority instance.", 0,
+				Integer.MAX_VALUE, 1,false));
 
-	
+		types.add(new ParameterTypeInt(PARAMETER_K, "The number of k neighbors. It's suggested to use odd numbers, or -1 to k=sqrt(|N|).", -1, Integer.MAX_VALUE, 5,false));
+
 
 		
-		return (String[]) result.toArray(new String[result.size()]);
+		types.addAll(DistanceMeasures.getParameterTypes(this));
+
+		//types.add(new ParameterTypeBoolean(PARAMETER_USE_DISTANCE_WEIGHT, "Use the distance as a weight for the knn undersampling count.", true,false));
+
+		
+		types.add(new ParameterTypeInt(PARAMETER_LOG_VERBOSITY, "The level of log produced on standard output.", 0,3,true));
+
+
+		//types.add(new ParameterTypeString(PARAMETER_GENERATE_OUTPUT_FILE,"Writes the KNN UND output into a file",""));
+		
+		return types;
 	}
 
-	
-
-	public int getMajorityClass() {
-		return w_majorityClass;
-	}
-
-	public void setMajorityClass(int w) {
-		this.w_majorityClass = w;
-	}
-
-	
-	
-	
-	/**
-	 * Main method for testing this class.
-	 * 
-	 * @param argv
-	 *            should contain arguments to the filter: use -h for help
-	 */
-	public static void main(String[] argv) {
-		runFilter(new SMOTEFilter(), argv);
-	}
-
-	public String getRevision() {
-		// TODO Auto-generated method stub
-		return "No revision";
-	}
-	
-	public NearestNeighbourSearch getNNSearch() {
-		return K_NNSearch;
-	}
-
-	public void setNNSearch(NearestNeighbourSearch search) {
-		K_NNSearch = search;
-	}
-
-	
-	public int getThreshold() {
-		return t_threshold;
-	}
-
-	public void setThreshold(int t_threshold) {
-		this.t_threshold = t_threshold;
-	}
-
-	
 }
