@@ -84,17 +84,17 @@ knn_und <- function(X,y,majority_class, k=7, t=5, algorithm="kd_tree"){
   
     nns_indexes=knnx.index(X,example,k=k,algorithm="kd_tree")
     nns_labels=y[nns_indexes]
-    num_of_majority=0
+    num_of_minority=0
     
     for (nn_label in nns_labels)
     {
      
-      if (nn_label==majority_class)
+      if (nn_label!=majority_class)
       {
-          num_of_majority=num_of_majority+1
+          num_of_minority=num_of_minority+1
       }
     }
-    if (num_of_majority>t)
+    if (num_of_minority>t)
     {
 
         result[i]=FALSE
